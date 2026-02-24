@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 import html
+import io
 import os
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,11 +15,23 @@ def render_page(*, count: str = "100", seed: str = "", codes: str | None = None,
     safe_count = html.escape(str(count))
     safe_seed = html.escape(seed)
     safe_error = f'<div class="error">{html.escape(error)}</div>' if error else ""
-    safe_codes = (
+    safe_codes = html.escape(codes) if codes else ""
+    download_form = (
+        f"""
+      <form method=\"post\" action=\"/download-csv\" class=\"download-form\">
+        <input type=\"hidden\" name=\"codes\" value=\"{safe_codes}\" />
+        <button type=\"submit\">Download CSV</button>
+      </form>
+      """
+        if codes
+        else ""
+    )
+    codes_section = (
         f"""
       <section class=\"result\">
         <h2>Generated codes</h2>
-        <textarea readonly>{html.escape(codes)}</textarea>
+        <textarea readonly>{safe_codes}</textarea>
+        {download_form}
       </section>
       """
         if codes
@@ -36,6 +50,7 @@ def render_page(*, count: str = "100", seed: str = "", codes: str | None = None,
       .card {{ max-width: 720px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.08); padding: 1.5rem; }}
       h1 {{ margin-top: 0; }}
       form {{ display: grid; grid-template-columns: 1fr 1fr auto; gap: .75rem; align-items: end; }}
+      .download-form {{ margin-top: .75rem; display: block; }}
       label {{ display: grid; gap: .35rem; font-weight: 600; }}
       input, textarea, button {{ font: inherit; }}
       input, textarea {{ border: 1px solid #d0d7de; border-radius: 8px; padding: .6rem; }}
@@ -49,14 +64,14 @@ def render_page(*, count: str = "100", seed: str = "", codes: str | None = None,
   <body>
     <main class=\"card\">
       <h1>Access Code Generator</h1>
-      <p>Generate unique 5-character non-word access codes suitable for datasheets.</p>
+      <p>Generate unique 5-character alphabetic non-word access codes suitable for datasheets.</p>
       <form method=\"post\" action=\"/generate\">
         <label>Number of codes<input type=\"number\" min=\"1\" step=\"1\" name=\"count\" value=\"{safe_count}\" required /></label>
         <label>Seed (optional)<input type=\"number\" step=\"1\" name=\"seed\" value=\"{safe_seed}\" placeholder=\"e.g. 1234\" /></label>
         <button type=\"submit\">Generate</button>
       </form>
       {safe_error}
-      {safe_codes}
+      {codes_section}
     </main>
   </body>
 </html>
@@ -72,6 +87,15 @@ class AppHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
+    def _send_csv(self, csv_data: str, filename: str = "access-codes.csv") -> None:
+        encoded = csv_data.encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/csv; charset=utf-8")
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
     def do_GET(self) -> None:  # noqa: N802
         if self.path != "/":
             self._send_html(render_page(error="Page not found."), status=HTTPStatus.NOT_FOUND)
@@ -79,13 +103,28 @@ class AppHandler(BaseHTTPRequestHandler):
         self._send_html(render_page())
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/generate":
+        if self.path not in {"/generate", "/download-csv"}:
             self._send_html(render_page(error="Page not found."), status=HTTPStatus.NOT_FOUND)
             return
 
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length).decode("utf-8")
         form = parse_qs(body)
+
+        if self.path == "/download-csv":
+            codes_raw = form.get("codes", [""])[0]
+            code_rows = [line.strip() for line in codes_raw.splitlines() if line.strip()]
+            if not code_rows:
+                self._send_html(render_page(error="No codes available to download."), status=HTTPStatus.BAD_REQUEST)
+                return
+
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(["code"])
+            for code in code_rows:
+                writer.writerow([code])
+            self._send_csv(output.getvalue())
+            return
 
         count_raw = form.get("count", ["100"])[0]
         seed_raw = form.get("seed", [""])[0].strip()
@@ -96,7 +135,11 @@ class AppHandler(BaseHTTPRequestHandler):
             self._send_html(render_page(count=count_raw, seed=seed_raw, error="Count must be a whole number."))
             return
 
-        seed = int(seed_raw) if seed_raw else None
+        try:
+            seed = int(seed_raw) if seed_raw else None
+        except ValueError:
+            self._send_html(render_page(count=str(count), seed=seed_raw, error="Seed must be a whole number."))
+            return
 
         try:
             codes = generate_codes(count, seed=seed)

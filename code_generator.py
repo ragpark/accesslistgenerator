@@ -6,7 +6,7 @@ import random
 from typing import Iterable
 
 # Avoid vowels so generated strings are unlikely to form words.
-ALPHABET = "BCDFGHJKLMNPQRSTVWXYZ23456789"
+ALPHABET = "BCDFGHJKLMNPQRSTVWXYZ"
 CODE_LENGTH = 5
 
 # Extra guardrail against accidental rude content.

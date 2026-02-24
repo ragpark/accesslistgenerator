@@ -5,11 +5,12 @@ Web app to generate unique 5-character access codes suitable for an access code 
 ## Features
 
 - Web UI (no CLI)
-- Generates **5-character** codes
-- Uses a consonant + number alphabet to favor **non-word** strings
+- Generates **5-character alphabetic** codes (letters only, no numbers)
+- Uses a consonant-only alphabet to favor **non-word** strings
 - Filters blocked rude sequences for **safe-for-work** output
 - Guarantees **no repeats** in each generated batch
 - Optional deterministic seed for reproducible batches
+- Download generated codes as CSV
 - Runs with Python standard library only
 
 ## Run locally
